@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+
+PACKAGES="k3b"
+
+kdialog --title "K3B Install" --msgbox \
+"This script is intended to enable Optical Disk authoring from the Steam Deck.
+(You'll need a USB optical disc drive, of course!)
+
+This solution requires an administrative password on the next window.
+It is strongly advised that you open this script in a text editor before running it.
+
+No waranty, express or implied, has been granted to you. Continue at your own discression.
+It's your own fault if you brick your deck."
+
+PASS=$(kdialog --title "K3B Install" --password "Please give your password for administrative priviledges.")
+
+add_optional_packages(){
+    kdialog --title "K3B Install" --passivepopup "Adding optional packages" 10
+    PACKAGES="$PACKAGES cdrtools dvd+rw-tools cdrdao cdparanoia transcode"
+}
+legal_question(){
+    kdialog --title "K3B Install" --yesno \
+    "K3B utilizes several optional dependencies for certain actions, such as ripping an audio CD.
+
+    These dependencies may be patent encumbered in your region, restricted from export,\n or otherwise embargoed. Still, they are available to you in the package database.
+
+    Would you like to have them installed?" \
+    "NEW:
+        - cdrtools: for CD burning with cdrecord
+        - dvd+rw-tools: for DVD burning support
+        - cdrdao: for disk-at-once (DAO) mode support
+        - transcode: for DVD ripping support
+
+    REINSTALL (Included in SteamOS):
+        - cdparanoia: for CD ripping support
+
+    NOT INCLUDED:
+        - vcdimager: for VCD burning support
+        - emovix: for bootable multimedia CD/DVD support"
+    OPT_IN="$?"
+    if [[ $OPT_IN -ne 1 ]]; then
+        add_optional_packages
+    fi
+}
+
+disable_readonly_filesystem(){
+    kdialog --title "K3B Install" --passivepopup "Unlocking Filesystem" 10
+    if [[ $(echo "$PASS" | sudo -S steamos-readonly status) == "enabled" ]];
+    then
+        echo "$PASS" | sudo -S steamos-readonly disable
+    fi
+}
+enable_readonly_filesystem(){
+    kdialog --title "K3B Install" --passivepopup "Locking Filesystem" 10
+    if [[ $(echo "$PASS" | sudo -S steamos-readonly status) == "disabled" ]];
+    then
+        echo "$PASS" | sudo -S steamos-readonly enable
+    fi
+}
+init_pacman_keyring(){
+    kdialog --title "K3B Install" --passivepopup "Importing Pacman Signing Keys" 10
+    echo "$PASS" | sudo -S pacman-key --init
+    echo "$PASS" | sudo -S pacman-key --populate archlinux holo
+}
+connection_test(){
+    if [[ "$(wget -q --spider http://google.com)" -ne 0 ]]; then
+        kdialog --title "K3B Install" --error "Connection Test Failure: Prematurly Halting Script" \
+        "The script was unable to verify a working internet connection. Please reconnect to the internet and try again. If you have an ethernet-enabled dock, please connect directly to your router to ensure a stable connection."
+        exit 13
+    fi
+}
+package_install(){
+    kdialog --title "K3B Install" --passivepopup "Installing K3B and dependencies" 10
+    # shellcheck disable=SC2086
+    echo "$PASS" | sudo -S pacman -Sy --noconfirm $PACKAGES
+}
+
+# CONTROL FLOW
+connection_test
+legal_question
+disable_readonly_filesystem
+init_pacman_keyring
+package_install
+# clean-up tasks
+enable_readonly_filesystem
+
+unset "$PASS"
+unset "$OPT_IN"
+unset "$PACKAGES"
