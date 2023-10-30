@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+
+# Based on the script by LittleJawa, with edits from its feature on deckplosion.de
+# - Original Thread: https://steamcommunity.com/app/1675200/discussions/2/3273562123582957766/
+# - Adapted From: https://deckplosion.de/install-printer-driver-on-steam-deck/
+
+# Core Packages - See add_optional_packages function for additions
+PACKAGES="cups print-manager system-config-printer"
+
+###############################################################################
+kdialog --title "CUPS Install" --msgbox \
+"This script is intended to enable printing from the Steam Deck.
+
+This solution requires an administrative password on the next window.
+
+It is strongly advised that you open this script in a text editor before running it.
+You may also take that time to tweak the optional packages to be included.
+
+No waranty, express or implied, has been granted to you. Continue at your own discression.
+It's your own fault if you brick your deck."
+###############################################################################
+
+PASS=$(kdialog --password \
+"Please give your password for administrative priviledges.")
+
+disable_readonly_filesystem(){
+    if [[ $(echo "$PASS" | sudo -S steamos-readonly status) == "enabled" ]];
+    then
+        echo "$PASS" | sudo -S steamos-readonly disable
+    fi
+}
+enable_readonly_filesystem(){
+    if [[ $(echo "$PASS" | sudo -S steamos-readonly status) == "disabled" ]];
+    then
+        echo "$PASS" | sudo -S steamos-readonly enable
+    fi
+}
+cleanup_old_cups_install() {
+    kdialog --title "CUPS Install" --passivepopup \
+    "Cleaning up files from older installations." 10
+    if [[ -d /etc/cups/ ]];
+    then
+        if [[ -f /etc/cups/cups-files.conf.default || \
+        -f /etc/cups/cupsd.conf.default || \
+        -f /etc/cups/snmp.conf.default ]];
+        then
+            echo "$PASS" | sudo -S rm /etc/cups/cups-files.conf.default
+            echo "$PASS" | sudo -S rm /etc/cups/cupsd.conf.default
+            echo "$PASS" | sudo -S rm /etc/cups/snmp.conf.default
+
+        fi
+    fi
+    if [[ -d /etc/xdg/autostart ]];
+    then
+        if [[ -f /etc/xdg/autostart/print-applet.desktop ]];
+        then
+            echo "$PASS" | sudo -S rm /etc/xdg/autostart/print-applet.desktop
+            echo "$PASS" | sudo -S rm /etc/cupshelpers/preferreddrivers.xml
+        fi
+    fi
+    if [[ -d /etc/cupshelpers ]];
+    then
+        if [[ -f /etc/cupshelpers/preferreddrivers.xml ]];
+        then
+            echo "$PASS" | sudo -S rm /etc/cupshelpers/preferreddrivers.xml
+        fi
+    fi
+}
+init_pacman_keyring(){
+    kdialog --title "CUPS Install" --passivepopup \
+    "Initializing Pacman Keyring" 10
+    echo "$PASS" | sudo -S pacman-key --init
+    ## Need 'holo' for steam's CI signing key.
+    echo "$PASS" | sudo -S pacman-key --populate archlinux holo
+}
+add_optional_packages(){
+    ## TODO: Use KDialog with tickboxes to select packages
+
+    # Auto-discovery via DNS
+    # https://wiki.archlinux.org/title/Avahi#Hostname_resolution
+    PACKAGES="$PACKAGES nss-mdns"
+
+    # WARNING: requires to update the /etc/nsswitch.conf file
+    # use the following:
+    # sed -i s/mymachines resolve/mymachines mdns_minimal
+    #[NOTFOUND=return] resolve/ /etc/nsswitch.conf
+
+    # Optionals (helpful)
+    # foomatic pre-built ppd drivers
+    PACKAGES="$PACKAGES foomatic-db-engine foomatic-db-ppds \
+    foomatic-db-nonfree-ppds"
+
+    # ghostscript for non-pdf printers
+    PACKAGES="$PACKAGES ghostscript"
+
+    # cups-filters for driverless printers
+    PACKAGES="$PACKAGES cups-filters"
+}
+install_packages(){
+    ## TODO: present confirmation via kdialog.
+    kdialog --title "CUPS Install" --passivepopup \
+    "Installing Printing Packages" 10
+    # shellcheck disable=SC2086
+    echo "$PASS" | sudo -S pacman -Sy --noconfirm $PACKAGES
+}
+enable_services(){
+    kdialog --title "CUPS Install" --passivepopup \
+    "Enabling Printing Services" 10
+    echo "$PASS" | sudo -S systemctl enable --now avahi-daemon
+    echo "$PASS" | sudo -S systemctl enable --now cups
+}
+connection_test(){
+
+    if [ ! "$(wget -q --spider http://google.com)" -eq 0 ]; then
+        kdialog --title "CUPS Install" --error "Connection Test Failure: Prematurly Halting Script" \
+        "The CUPS Install script was unable to verify a working internet connection. Please reconnect to the internet and try again. If you have an ethernet-enabled dock, please connect directly to your router to ensure a stable connection."
+        exit 13
+    fi
+}
+
+## Control Flow
+connection_test
+disable_readonly_filesystem
+cleanup_old_cups_install
+init_pacman_keyring
+add_optional_packages
+install_packages
+enable_services
+enable_readonly_filesystem
+
+unset "$PASS"
+unset "$PACKAGES"
+
+kdialog --msgbox \
+"Printing should now be enabled.
+
+Please visit http://localhost:631/admin in a browser to manage printers." \
+"To verify everything ran smoothly, please check your log files.
+You can use 'journalctl' to do so from a Konsole window."
